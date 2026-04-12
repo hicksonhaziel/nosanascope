@@ -62,6 +62,15 @@ function inferPreferenceFromText(input: string): AlertPreference {
   };
 }
 
+/**
+ * Extracts normalized alert preference fields from a user utterance.
+ *
+ * @param runtime - Active Eliza runtime used to call the lightweight model.
+ * @param input - Raw user instruction describing alert preferences.
+ * @returns Parsed alert preference object with event, threshold, channel, and enabled flag.
+ * @example
+ * await extractAlertPreference(runtime, "notify me on credit drops below 20% on telegram");
+ */
 export async function extractAlertPreference(
   runtime: IAgentRuntime,
   input: string
@@ -112,6 +121,16 @@ Return strict JSON only:
   }
 }
 
+/**
+ * Persists extracted alert preference into memory, logs, and scoped caches.
+ *
+ * @param runtime - Active Eliza runtime used for persistence APIs.
+ * @param message - Message context that supplies room/entity identifiers.
+ * @param preference - Normalized alert preference to persist.
+ * @returns Promise that resolves when preference persistence finishes.
+ * @example
+ * await storeAlertPreference(runtime, message, preference);
+ */
 export async function storeAlertPreference(
   runtime: IAgentRuntime,
   message: Memory,
@@ -165,6 +184,15 @@ export async function storeAlertPreference(
   }
 }
 
+/**
+ * Retrieves the latest saved alert preference from cache, logs, or memory fallbacks.
+ *
+ * @param runtime - Active Eliza runtime used for cache/log/memory reads.
+ * @param opts - Optional room/entity scope used for prioritized lookup.
+ * @returns Most recent alert preference or `null` when none exist.
+ * @example
+ * const pref = await getLatestAlertPreference(runtime, { roomId, entityId });
+ */
 export async function getLatestAlertPreference(
   runtime: IAgentRuntime,
   opts: { roomId?: UUID; entityId?: UUID }

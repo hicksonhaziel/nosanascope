@@ -1,6 +1,23 @@
-import { Action, type IAgentRuntime, type Memory, type State, type HandlerCallback } from '@elizaos/core';
+import {
+  type Action,
+  type ActionResult,
+  type IAgentRuntime,
+  type Memory,
+  type State,
+  type HandlerCallback,
+} from '@elizaos/core';
 import { createNosanaClient } from '@nosana/kit';
+import { getRequiredNosanaApiKey } from '../config/envValidation.ts';
 
+/**
+ * Action definition for reading assigned, reserved, settled, and available Nosana credits.
+ *
+ * @param runtime - Active Eliza runtime handling the request.
+ * @param message - User message used to validate "credits/balance" intent.
+ * @returns Action object whose handler emits a credit balance `ActionResult`.
+ * @example
+ * User: "what is my balance?"
+ */
 export const getCreditsAction: Action = {
   name: 'GET_CREDITS',
   description: 'Check Nosana credit balance',
@@ -17,11 +34,11 @@ export const getCreditsAction: Action = {
     state?: State,
     options?: any,
     callback?: HandlerCallback
-  ): Promise<boolean> => {
+  ): Promise<ActionResult> => {
     try {
-      // Correct way: no network param when using API
+      const apiKey = getRequiredNosanaApiKey();
       const client = createNosanaClient(undefined as any, {
-        api: { apiKey: process.env.NOSANA_API_KEY },
+        api: { apiKey },
       });
       
       const balance = await client.api.credits.balance();
@@ -37,13 +54,21 @@ export const getCreditsAction: Action = {
         (available < 1000 ? '\n⚠️ Low balance! Top up at deploy.nosana.com' : '');
       
       if (callback) await callback({ text: response });
-      return true;
+      return {
+        success: true,
+        text: 'Fetched credit balance',
+        data: { available },
+      };
       
-    } catch (error: any) {
-      const errorMsg = `Failed to fetch credits: ${error.message}`;
-      console.error('[getCredits]', errorMsg, error);
+    } catch (error: unknown) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      const errorMsg = `Failed to fetch credits: ${messageText}`;
       if (callback) await callback({ text: errorMsg });
-      return false;
+      return {
+        success: false,
+        text: errorMsg,
+        error: messageText,
+      };
     }
   },
   

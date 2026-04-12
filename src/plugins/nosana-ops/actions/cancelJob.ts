@@ -1,6 +1,23 @@
-import { Action, type IAgentRuntime, type Memory, type State, type HandlerCallback } from '@elizaos/core';
+import {
+  type Action,
+  type ActionResult,
+  type IAgentRuntime,
+  type Memory,
+  type State,
+  type HandlerCallback,
+} from '@elizaos/core';
 import { createNosanaClient } from '@nosana/kit';
+import { getRequiredNosanaApiKey } from '../config/envValidation.ts';
 
+/**
+ * Action definition for safe deployment cancellation with explicit user confirmation.
+ *
+ * @param runtime - Active Eliza runtime handling the request.
+ * @param message - User message used to validate cancel intent and extract deployment name.
+ * @returns Action object whose handler emits a cancellation `ActionResult`.
+ * @example
+ * User: "cancel job my-deployment"
+ */
 export const cancelJobAction: Action = {
   name: 'CANCEL_JOB',
   description: 'Stop a running Nosana deployment',
@@ -20,11 +37,12 @@ export const cancelJobAction: Action = {
     state?: State,
     options?: any,
     callback?: HandlerCallback
-  ): Promise<boolean> => {
+  ): Promise<ActionResult> => {
     try {
       const text = message.content?.text || '';
+      const apiKey = getRequiredNosanaApiKey();
       const client = createNosanaClient(undefined as any, {
-        api: { apiKey: process.env.NOSANA_API_KEY },
+        api: { apiKey },
       });
       
       // Check if this is a "yes cancel <name>" confirmation
@@ -33,26 +51,29 @@ export const cancelJobAction: Action = {
       if (confirmMatch) {
         const deploymentName = confirmMatch[1];
         
-        console.log('[cancelJob] Confirmed cancellation for:', deploymentName);
-        
         const list = await client.api.deployments.list();
         const found = list.deployments.find((d: any) => d.name === deploymentName);
         
         if (!found) {
           if (callback) await callback({ text: `"${deploymentName}" not found.` });
-          return false;
+          return {
+            success: false,
+            text: `"${deploymentName}" not found.`,
+            error: 'deployment_not_found',
+          };
         }
         
         const deployment = await client.api.deployments.get(found.id);
-        
-        console.log('[cancelJob] Stopping:', deployment.id, '- Status:', deployment.status);
-        const result = await deployment.stop();
-        console.log('[cancelJob] Stop result:', JSON.stringify(result, null, 2));
+        await deployment.stop();
         
         if (callback) await callback({ 
           text: `✅ Stopped "${deployment.name}".\nCheck dashboard in 30-60 seconds.`
         });
-        return true;
+        return {
+          success: true,
+          text: `Stopped "${deployment.name}"`,
+          data: { deploymentId: String(deployment.id) },
+        };
       }
       
       // Initial request
@@ -60,7 +81,11 @@ export const cancelJobAction: Action = {
       
       if (!nameMatch) {
         if (callback) await callback({ text: 'Usage: "cancel job <name>"' });
-        return false;
+        return {
+          success: false,
+          text: 'Usage: "cancel job <name>"',
+          error: 'invalid_cancel_command',
+        };
       }
       
       const list = await client.api.deployments.list();
@@ -68,7 +93,11 @@ export const cancelJobAction: Action = {
       
       if (!found) {
         if (callback) await callback({ text: `"${nameMatch[1]}" not found.` });
-        return false;
+        return {
+          success: false,
+          text: `"${nameMatch[1]}" not found.`,
+          error: 'deployment_not_found',
+        };
       }
       
       if (callback) await callback({ 
@@ -76,12 +105,20 @@ export const cancelJobAction: Action = {
               `Status: ${found.status}, Jobs: ${found.active_jobs}\n\n` +
               `Reply: "yes cancel ${found.name}"`
       });
-      return false;
+      return {
+        success: false,
+        text: `Confirmation required to cancel "${found.name}"`,
+        data: { needsConfirmation: true, deploymentName: String(found.name || '') },
+      };
       
-    } catch (error: any) {
-      console.error('[cancelJob] ERROR:', error);
-      if (callback) await callback({ text: `Failed: ${error.message}` });
-      return false;
+    } catch (error: unknown) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      if (callback) await callback({ text: `Failed: ${messageText}` });
+      return {
+        success: false,
+        text: `Failed: ${messageText}`,
+        error: messageText,
+      };
     }
   },
   

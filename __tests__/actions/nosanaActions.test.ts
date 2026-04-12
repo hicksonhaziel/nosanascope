@@ -62,9 +62,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await getJobsAction.handler(runtime, makeMessage('show jobs'), undefined, undefined, callback);
+      const result = await getJobsAction.handler(runtime, makeMessage('show jobs'), undefined, undefined, callback);
 
-      expect(ok).toBe(true);
+      expect(result.success).toBe(true);
       expect(callback).toHaveBeenCalledWith(expect.objectContaining({ text: 'No deployments found.' }));
     });
 
@@ -85,9 +85,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await getJobsAction.handler(runtime, makeMessage('list jobs'), undefined, undefined, callback);
+      const result = await getJobsAction.handler(runtime, makeMessage('list jobs'), undefined, undefined, callback);
 
-      expect(ok).toBe(true);
+      expect(result.success).toBe(true);
       const text = String(callback.mock.calls[0][0].text);
       expect(text).toContain('Deployments (3 total)');
       expect(text).toContain('Running: 1');
@@ -106,9 +106,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await getJobsAction.handler(runtime, makeMessage('jobs'), undefined, undefined, callback);
+      const result = await getJobsAction.handler(runtime, makeMessage('jobs'), undefined, undefined, callback);
 
-      expect(ok).toBe(false);
+      expect(result.success).toBe(false);
       expect(String(callback.mock.calls[0][0].text)).toContain('Failed: list failed');
     });
   });
@@ -128,9 +128,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await getCreditsAction.handler(runtime, makeMessage('balance'), undefined, undefined, callback);
+      const result = await getCreditsAction.handler(runtime, makeMessage('balance'), undefined, undefined, callback);
 
-      expect(ok).toBe(true);
+      expect(result.success).toBe(true);
       const text = String(callback.mock.calls[0][0].text);
       expect(text).toContain('Available: 950');
       expect(text).toContain('Low balance!');
@@ -146,9 +146,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await getCreditsAction.handler(runtime, makeMessage('credits'), undefined, undefined, callback);
+      const result = await getCreditsAction.handler(runtime, makeMessage('credits'), undefined, undefined, callback);
 
-      expect(ok).toBe(false);
+      expect(result.success).toBe(false);
       expect(String(callback.mock.calls[0][0].text)).toContain('Failed to fetch credits: credits failed');
     });
   });
@@ -196,9 +196,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await getMetricsAction.handler(runtime, makeMessage('show metrics'), undefined, undefined, callback);
+      const result = await getMetricsAction.handler(runtime, makeMessage('show metrics'), undefined, undefined, callback);
 
-      expect(ok).toBe(true);
+      expect(result.success).toBe(true);
       const text = String(callback.mock.calls[0][0].text);
       expect(text).toContain('Infrastructure Metrics');
       expect(text).toContain('Deployments: 2 total');
@@ -217,9 +217,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await getMetricsAction.handler(runtime, makeMessage('metrics'), undefined, undefined, callback);
+      const result = await getMetricsAction.handler(runtime, makeMessage('metrics'), undefined, undefined, callback);
 
-      expect(ok).toBe(false);
+      expect(result.success).toBe(false);
       expect(String(callback.mock.calls[0][0].text)).toContain('Failed: metrics failed');
     });
   });
@@ -237,9 +237,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await cancelJobAction.handler(runtime, makeMessage('cancel job test2'), undefined, undefined, callback);
+      const result = await cancelJobAction.handler(runtime, makeMessage('cancel job test2'), undefined, undefined, callback);
 
-      expect(ok).toBe(false);
+      expect(result.success).toBe(false);
       const text = String(callback.mock.calls[0][0].text);
       expect(text).toContain('Stop "test2"?');
       expect(text).toContain('yes cancel test2');
@@ -259,9 +259,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await cancelJobAction.handler(runtime, makeMessage('yes cancel test2'), undefined, undefined, callback);
+      const result = await cancelJobAction.handler(runtime, makeMessage('yes cancel test2'), undefined, undefined, callback);
 
-      expect(ok).toBe(true);
+      expect(result.success).toBe(true);
       expect(stop).toHaveBeenCalledTimes(1);
       expect(String(callback.mock.calls[0][0].text)).toContain('Stopped "test2"');
     });
@@ -276,9 +276,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await cancelJobAction.handler(runtime, makeMessage('cancel job missing-one'), undefined, undefined, callback);
+      const result = await cancelJobAction.handler(runtime, makeMessage('cancel job missing-one'), undefined, undefined, callback);
 
-      expect(ok).toBe(false);
+      expect(result.success).toBe(false);
       expect(String(callback.mock.calls[0][0].text)).toContain('"missing-one" not found.');
     });
   });
@@ -296,9 +296,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await restartJobAction.handler(runtime, makeMessage('restart job test2'), undefined, undefined, callback);
+      const result = await restartJobAction.handler(runtime, makeMessage('restart job test2'), undefined, undefined, callback);
 
-      expect(ok).toBe(false);
+      expect(result.success).toBe(false);
       expect(setPendingMock).toHaveBeenCalledTimes(1);
       expect(String(callback.mock.calls[0][0].text)).toContain('Reply YES to confirm or NO to cancel');
     });
@@ -325,9 +325,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await restartJobAction.handler(runtime, makeMessage('yes restart test2'), undefined, undefined, callback);
+      const result = await restartJobAction.handler(runtime, makeMessage('yes restart test2'), undefined, undefined, callback);
 
-      expect(ok).toBe(true);
+      expect(result.success).toBe(true);
       expect(clearPendingMock).toHaveBeenCalledWith(
         runtime,
         { roomId: 'room-1', entityId: 'entity-1' },
@@ -353,15 +353,81 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await restartJobAction.handler(runtime, makeMessage('no'), undefined, undefined, callback);
+      const result = await restartJobAction.handler(runtime, makeMessage('no'), undefined, undefined, callback);
 
-      expect(ok).toBe(false);
+      expect(result.success).toBe(false);
       expect(clearPendingMock).toHaveBeenCalledWith(
         runtime,
         { roomId: 'room-1', entityId: 'entity-1' },
         'cancelled'
       );
       expect(String(callback.mock.calls[0][0].text)).toContain('Restart cancelled');
+    });
+
+    it('enforces restart rate limit (max 3 per minute)', async () => {
+      const rateLimitRuntime = { agentId: 'agent-rate-limit' } as any;
+      const rateLimitMessage = (text: string) => ({
+        content: { text },
+        roomId: 'room-rate-limit',
+        entityId: 'entity-rate-limit',
+      });
+
+      const start = jest.fn().mockResolvedValue(undefined);
+      createNosanaClientMock.mockReturnValue({
+        api: {
+          deployments: {
+            list: jest.fn().mockResolvedValue({
+              deployments: [{ id: 'dep-1', name: 'test2', status: 'STOPPED', active_jobs: 0 }],
+            }),
+            get: jest.fn().mockResolvedValue({
+              id: 'dep-1',
+              name: 'test2',
+              status: 'STOPPED',
+              start,
+              stop: jest.fn(),
+            }),
+          },
+        },
+      });
+
+      const callback = mockCallback();
+      const attempts = [
+        await restartJobAction.handler(
+          rateLimitRuntime,
+          rateLimitMessage('yes restart test2'),
+          undefined,
+          undefined,
+          callback
+        ),
+        await restartJobAction.handler(
+          rateLimitRuntime,
+          rateLimitMessage('yes restart test2'),
+          undefined,
+          undefined,
+          callback
+        ),
+        await restartJobAction.handler(
+          rateLimitRuntime,
+          rateLimitMessage('yes restart test2'),
+          undefined,
+          undefined,
+          callback
+        ),
+        await restartJobAction.handler(
+          rateLimitRuntime,
+          rateLimitMessage('yes restart test2'),
+          undefined,
+          undefined,
+          callback
+        ),
+      ];
+
+      expect(attempts[0].success).toBe(true);
+      expect(attempts[1].success).toBe(true);
+      expect(attempts[2].success).toBe(true);
+      expect(attempts[3].success).toBe(false);
+      const lastText = String(callback.mock.calls[callback.mock.calls.length - 1][0].text);
+      expect(lastText).toContain('Rate limit reached');
     });
   });
 
@@ -370,9 +436,9 @@ describe('Nosana actions', () => {
       process.env.NOSANA_JOB_TEMPLATE = '';
       const callback = mockCallback();
 
-      const ok = await spawnJobAction.handler(runtime, makeMessage('spawn job'), undefined, undefined, callback);
+      const result = await spawnJobAction.handler(runtime, makeMessage('spawn job'), undefined, undefined, callback);
 
-      expect(ok).toBe(false);
+      expect(result.success).toBe(false);
       expect(String(callback.mock.calls[0][0].text)).toContain('No job template configured');
     });
 
@@ -391,9 +457,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await spawnJobAction.handler(runtime, makeMessage('spawn deployment from template'), undefined, undefined, callback);
+      const result = await spawnJobAction.handler(runtime, makeMessage('spawn deployment from template'), undefined, undefined, callback);
 
-      expect(ok).toBe(false);
+      expect(result.success).toBe(false);
       expect(String(callback.mock.calls[0][0].text)).toContain('Reply: "yes spawn"');
     });
 
@@ -422,9 +488,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await spawnJobAction.handler(runtime, makeMessage('yes spawn'), undefined, undefined, callback);
+      const result = await spawnJobAction.handler(runtime, makeMessage('yes spawn'), undefined, undefined, callback);
 
-      expect(ok).toBe(true);
+      expect(result.success).toBe(true);
       expect(start).toHaveBeenCalledTimes(1);
       const text = String(callback.mock.calls[0][0].text);
       expect(text).toContain('Deployment "demo-template" created');
@@ -448,9 +514,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await getNodeHealthAction.handler(runtime, makeMessage('check node health'), undefined, undefined, callback);
+      const result = await getNodeHealthAction.handler(runtime, makeMessage('check node health'), undefined, undefined, callback);
 
-      expect(ok).toBe(true);
+      expect(result.success).toBe(true);
       const text = String(callback.mock.calls[0][0].text);
       expect(text).toContain('No RUNNING deployments found');
       expect(text).toContain('Available markets: 1');
@@ -489,9 +555,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await getNodeHealthAction.handler(runtime, makeMessage('node status'), undefined, undefined, callback);
+      const result = await getNodeHealthAction.handler(runtime, makeMessage('node status'), undefined, undefined, callback);
 
-      expect(ok).toBe(true);
+      expect(result.success).toBe(true);
       const text = String(callback.mock.calls[0][0].text);
       expect(text).toContain('Active serving nodes: 1');
       expect(text).toContain('Top nodes:');
@@ -511,9 +577,9 @@ describe('Nosana actions', () => {
       });
 
       const callback = mockCallback();
-      const ok = await getNodeHealthAction.handler(runtime, makeMessage('serving nodes'), undefined, undefined, callback);
+      const result = await getNodeHealthAction.handler(runtime, makeMessage('serving nodes'), undefined, undefined, callback);
 
-      expect(ok).toBe(false);
+      expect(result.success).toBe(false);
       expect(String(callback.mock.calls[0][0].text)).toContain('Failed to fetch node health: health failed');
     });
   });

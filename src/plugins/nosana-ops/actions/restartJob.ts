@@ -1,10 +1,22 @@
-import { Action, type IAgentRuntime, type Memory, type State, type HandlerCallback } from '@elizaos/core';
+import {
+  type Action,
+  type ActionResult,
+  type IAgentRuntime,
+  type Memory,
+  type State,
+  type HandlerCallback,
+} from '@elizaos/core';
 import { createNosanaClient } from '@nosana/kit';
 import {
   clearPendingRestartConfirmation,
   getPendingRestartConfirmation,
   setPendingRestartConfirmation,
 } from './restartConfirmationStore.ts';
+import { getRequiredNosanaApiKey } from '../config/envValidation.ts';
+
+const RESTART_RATE_LIMIT_WINDOW_MS = 60_000;
+const RESTART_RATE_LIMIT_MAX_REQUESTS = 3;
+const restartAttemptsByScope = new Map<string, number[]>();
 
 function parseYesNoDecision(input: string): 'yes' | 'no' | null {
   const text = input.trim().toLowerCase();
@@ -19,6 +31,47 @@ function parseYesNoDecision(input: string): 'yes' | 'no' | null {
   return null;
 }
 
+function buildRestartScopeKey(runtime: IAgentRuntime, message: Memory): string {
+  return `${String(runtime.agentId)}:${String(message.roomId)}:${String(message.entityId)}`;
+}
+
+function consumeRestartToken(scopeKey: string): {
+  allowed: boolean;
+  retryAfterSeconds: number;
+  remaining: number;
+} {
+  const now = Date.now();
+  const windowStart = now - RESTART_RATE_LIMIT_WINDOW_MS;
+  const attempts = (restartAttemptsByScope.get(scopeKey) || []).filter((t) => t > windowStart);
+
+  if (attempts.length >= RESTART_RATE_LIMIT_MAX_REQUESTS) {
+    const oldest = attempts[0] || now;
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((RESTART_RATE_LIMIT_WINDOW_MS - (now - oldest)) / 1000)
+    );
+    restartAttemptsByScope.set(scopeKey, attempts);
+    return { allowed: false, retryAfterSeconds, remaining: 0 };
+  }
+
+  attempts.push(now);
+  restartAttemptsByScope.set(scopeKey, attempts);
+  return {
+    allowed: true,
+    retryAfterSeconds: 0,
+    remaining: Math.max(0, RESTART_RATE_LIMIT_MAX_REQUESTS - attempts.length),
+  };
+}
+
+/**
+ * Action definition for safe restart/start operations with YES/NO confirmation and rate limiting.
+ *
+ * @param runtime - Active Eliza runtime handling the request.
+ * @param message - User message used to validate restart intent or confirmation response.
+ * @returns Action object whose handler emits restart workflow `ActionResult` values.
+ * @example
+ * User: "restart job my-deployment" then "YES"
+ */
 export const restartJobAction: Action = {
   name: 'RESTART_JOB',
   description: 'Restart or start a Nosana deployment safely based on status',
@@ -47,13 +100,15 @@ export const restartJobAction: Action = {
     state?: State,
     options?: any,
     callback?: HandlerCallback
-  ): Promise<boolean> => {
+  ): Promise<ActionResult> => {
     try {
       const text = message.content?.text || '';
       const decision = parseYesNoDecision(text);
+      const apiKey = getRequiredNosanaApiKey();
       const client = createNosanaClient(undefined as any, {
-        api: { apiKey: process.env.NOSANA_API_KEY },
+        api: { apiKey },
       });
+      const scopeKey = buildRestartScopeKey(runtime, message);
 
       const findDeployment = async (identifier: string) => {
         const list = await client.api.deployments.list();
@@ -85,7 +140,6 @@ export const restartJobAction: Action = {
         }
 
         if (status === 'RUNNING' || status === 'STARTING') {
-          console.log('[restartJob] Stop then start:', deployment.id, 'status:', status);
           await deployment.stop();
           await new Promise((resolve) => setTimeout(resolve, 2000));
           await deployment.start();
@@ -97,7 +151,6 @@ export const restartJobAction: Action = {
           return true;
         }
 
-        console.log('[restartJob] Start only:', deployment.id, 'status:', status);
         await deployment.start();
         if (callback) {
           await callback({
@@ -111,13 +164,35 @@ export const restartJobAction: Action = {
       const confirmMatch = text.match(/\byes\s+restart\s+([a-zA-Z0-9_-]+)\b/i);
       if (confirmMatch) {
         const deploymentIdOrName = confirmMatch[1];
-        console.log('[restartJob] Confirmed restart for:', deploymentIdOrName);
+        const rate = consumeRestartToken(scopeKey);
+        if (!rate.allowed) {
+          if (callback) {
+            await callback({
+              text:
+                `Rate limit reached: restart can run up to ${RESTART_RATE_LIMIT_MAX_REQUESTS} times per minute.\n` +
+                `Try again in ${rate.retryAfterSeconds}s.`,
+            });
+          }
+          return {
+            success: false,
+            text: 'Restart rate limit reached',
+            error: 'restart_rate_limited',
+            data: { retryAfterSeconds: rate.retryAfterSeconds },
+          };
+        }
+
         await clearPendingRestartConfirmation(
           runtime,
           { roomId: message.roomId, entityId: message.entityId },
           'approved'
         );
-        return await restartDeployment(deploymentIdOrName);
+        const ok = await restartDeployment(deploymentIdOrName);
+        return {
+          success: ok,
+          text: ok ? `Restart executed for "${deploymentIdOrName}"` : `Restart failed for "${deploymentIdOrName}"`,
+          data: { deploymentIdOrName },
+          ...(ok ? {} : { error: 'restart_failed' }),
+        };
       }
 
       // Generic YES/NO path for pending confirmations (works well on Telegram).
@@ -134,7 +209,28 @@ export const restartJobAction: Action = {
               'cancelled'
             );
             if (callback) await callback({ text: `❌ Restart cancelled for "${pending.deploymentName}".` });
-            return false;
+            return {
+              success: false,
+              text: `Restart cancelled for "${pending.deploymentName}".`,
+              error: 'restart_cancelled',
+            };
+          }
+
+          const rate = consumeRestartToken(scopeKey);
+          if (!rate.allowed) {
+            if (callback) {
+              await callback({
+                text:
+                  `Rate limit reached: restart can run up to ${RESTART_RATE_LIMIT_MAX_REQUESTS} times per minute.\n` +
+                  `Try again in ${rate.retryAfterSeconds}s.`,
+              });
+            }
+            return {
+              success: false,
+              text: 'Restart rate limit reached',
+              error: 'restart_rate_limited',
+              data: { retryAfterSeconds: rate.retryAfterSeconds },
+            };
           }
 
           await clearPendingRestartConfirmation(
@@ -142,8 +238,15 @@ export const restartJobAction: Action = {
             { roomId: message.roomId, entityId: message.entityId },
             'approved'
           );
-          console.log('[restartJob] Approved via YES for pending deployment:', pending.deploymentName);
-          return await restartDeployment(pending.deploymentId);
+          const ok = await restartDeployment(pending.deploymentId);
+          return {
+            success: ok,
+            text: ok
+              ? `Restart executed for "${pending.deploymentName}"`
+              : `Restart failed for "${pending.deploymentName}"`,
+            data: { deploymentId: pending.deploymentId, deploymentName: pending.deploymentName },
+            ...(ok ? {} : { error: 'restart_failed' }),
+          };
         }
       }
 
@@ -152,10 +255,18 @@ export const restartJobAction: Action = {
       if (!nameMatch) {
         if (decision && callback) {
           await callback({ text: 'No pending restart confirmation. Use "restart job <name>" first.' });
-          return false;
+          return {
+            success: false,
+            text: 'No pending restart confirmation. Use "restart job <name>" first.',
+            error: 'no_pending_confirmation',
+          };
         }
         if (callback) await callback({ text: 'Usage: "restart job <name>" or "restart deployment <id>"' });
-        return false;
+        return {
+          success: false,
+          text: 'Usage: "restart job <name>" or "restart deployment <id>"',
+          error: 'invalid_restart_command',
+        };
       }
 
       const identifier = nameMatch[1];
@@ -163,7 +274,11 @@ export const restartJobAction: Action = {
 
       if (!found) {
         if (callback) await callback({ text: `"${identifier}" not found.` });
-        return false;
+        return {
+          success: false,
+          text: `"${identifier}" not found.`,
+          error: 'deployment_not_found',
+        };
       }
 
       const foundStatus = String(found.status || '').toUpperCase();
@@ -190,12 +305,20 @@ export const restartJobAction: Action = {
             `Reply YES to confirm or NO to cancel.\n` +
             `Shortcut: "yes restart ${found.name}"`,
         });
-      return false;
+      return {
+        success: false,
+        text: `Confirmation required to restart "${found.name}"`,
+        data: { needsConfirmation: true, deploymentId: String(found.id) },
+      };
       
-    } catch (error: any) {
-      console.error('[restartJob] ERROR:', error);
-      if (callback) await callback({ text: `Failed: ${error.message}` });
-      return false;
+    } catch (error: unknown) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      if (callback) await callback({ text: `Failed: ${messageText}` });
+      return {
+        success: false,
+        text: `Failed: ${messageText}`,
+        error: messageText,
+      };
     }
   },
   

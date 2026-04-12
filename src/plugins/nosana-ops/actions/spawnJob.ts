@@ -1,6 +1,23 @@
-import { Action, type IAgentRuntime, type Memory, type State, type HandlerCallback } from '@elizaos/core';
+import {
+  type Action,
+  type ActionResult,
+  type IAgentRuntime,
+  type Memory,
+  type State,
+  type HandlerCallback,
+} from '@elizaos/core';
 import { createNosanaClient } from '@nosana/kit';
+import { getRequiredNosanaApiKey } from '../config/envValidation.ts';
 
+/**
+ * Action definition for creating and optionally auto-starting deployments from a JSON template.
+ *
+ * @param runtime - Active Eliza runtime handling the request.
+ * @param message - User message used to validate spawn intent and confirmation phrase.
+ * @returns Action object whose handler emits deployment creation `ActionResult` values.
+ * @example
+ * User: "spawn job from template" then "yes spawn"
+ */
 export const spawnJobAction: Action = {
   name: 'SPAWN_JOB',
   description: 'Create and start a deployment from a stored template',
@@ -21,7 +38,7 @@ export const spawnJobAction: Action = {
     state?: State,
     options?: any,
     callback?: HandlerCallback
-  ): Promise<boolean> => {
+  ): Promise<ActionResult> => {
     try {
       const text = message.content?.text?.toLowerCase() || '';
       const isConfirmed = /\byes\s+(spawn|launch|create|deploy)\b/.test(text);
@@ -33,7 +50,11 @@ export const spawnJobAction: Action = {
         if (callback) await callback({ 
           text: 'No job template configured. Set NOSANA_JOB_TEMPLATE in your .env file.' 
         });
-        return false;
+        return {
+          success: false,
+          text: 'No job template configured. Set NOSANA_JOB_TEMPLATE in your .env file.',
+          error: 'missing_job_template',
+        };
       }
       
       let template: any;
@@ -45,7 +66,11 @@ export const spawnJobAction: Action = {
             text: 'NOSANA_JOB_TEMPLATE is invalid JSON. Fix the env value before spawning.',
           });
         }
-        return false;
+        return {
+          success: false,
+          text: 'NOSANA_JOB_TEMPLATE is invalid JSON. Fix the env value before spawning.',
+          error: 'invalid_job_template_json',
+        };
       }
 
       const missing: string[] = [];
@@ -61,11 +86,16 @@ export const spawnJobAction: Action = {
             text: `Template is missing required fields: ${missing.join(', ')}`,
           });
         }
-        return false;
+        return {
+          success: false,
+          text: `Template is missing required fields: ${missing.join(', ')}`,
+          error: 'incomplete_job_template',
+        };
       }
 
+      const apiKey = getRequiredNosanaApiKey();
       const client = createNosanaClient(undefined as any, {
-        api: { apiKey: process.env.NOSANA_API_KEY },
+        api: { apiKey },
       });
       
       // Safety confirmation (explicit text confirmation)
@@ -77,7 +107,11 @@ export const spawnJobAction: Action = {
                 `Strategy: ${template.strategy}, Replicas: ${template.replicas}, Timeout: ${template.timeout}m\n\n` +
                 `Reply: "yes spawn"`
         });
-        return false;
+        return {
+          success: false,
+          text: 'Spawn requires explicit confirmation.',
+          data: { needsConfirmation: true, templateName: String(template.name || '') },
+        };
       }
       
       // Create deployment
@@ -100,13 +134,21 @@ export const spawnJobAction: Action = {
             `ID: ${deployment.id}\n` +
             `Status: ${status}${startNote}`,
         });
-      return true;
+      return {
+        success: true,
+        text: `Deployment "${deployment.name}" created`,
+        data: { deploymentId: String(deployment.id), status },
+      };
       
-    } catch (error: any) {
-      const errorMsg = `Failed to spawn: ${error.message}`;
-      console.error('[spawnJob]', errorMsg, error);
+    } catch (error: unknown) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      const errorMsg = `Failed to spawn: ${messageText}`;
       if (callback) await callback({ text: errorMsg });
-      return false;
+      return {
+        success: false,
+        text: errorMsg,
+        error: messageText,
+      };
     }
   },
   

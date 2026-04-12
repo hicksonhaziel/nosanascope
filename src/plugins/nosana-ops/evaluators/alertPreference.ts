@@ -14,6 +14,15 @@ function isAlertPreferenceIntent(text: string): boolean {
   );
 }
 
+/**
+ * Evaluator definition that extracts alert preferences from conversational instructions.
+ *
+ * @param runtime - Active Eliza runtime used for model extraction and persistence.
+ * @param message - Current conversation message inspected for alert intent.
+ * @returns Evaluator object that stores normalized alert preferences in memory/logs.
+ * @example
+ * User: "alert me when any job fails and send to telegram"
+ */
 export const alertPreferenceEvaluator: Evaluator = {
   name: 'ALERT_PREFERENCE_EVALUATOR',
   description: 'Extracts and persists user alert preferences from conversation',

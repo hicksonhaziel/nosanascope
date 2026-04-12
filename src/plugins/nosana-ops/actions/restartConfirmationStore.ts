@@ -30,6 +30,16 @@ function isValidPendingRestart(value: unknown): value is PendingRestartConfirmat
   );
 }
 
+/**
+ * Stores a pending restart confirmation request with a scoped TTL cache entry.
+ *
+ * @param runtime - Active Eliza runtime used for scoped cache and log writes.
+ * @param context - Optional room/entity scope that controls where confirmation is cached.
+ * @param pending - Deployment metadata to persist for later YES/NO confirmation resolution.
+ * @returns Stored confirmation payload including request and expiry timestamps.
+ * @example
+ * await setPendingRestartConfirmation(runtime, { roomId, entityId }, pending);
+ */
 export async function setPendingRestartConfirmation(
   runtime: IAgentRuntime,
   context: { roomId?: UUID; entityId?: UUID },
@@ -64,6 +74,15 @@ export async function setPendingRestartConfirmation(
   return stored;
 }
 
+/**
+ * Retrieves the latest restart confirmation request in scope if it is still valid.
+ *
+ * @param runtime - Active Eliza runtime used for scoped cache access.
+ * @param context - Optional room/entity scope used to prioritize cached confirmations.
+ * @returns Pending restart confirmation payload or `null` when none exists or it has expired.
+ * @example
+ * const pending = await getPendingRestartConfirmation(runtime, { roomId, entityId });
+ */
 export async function getPendingRestartConfirmation(
   runtime: IAgentRuntime,
   context: { roomId?: UUID; entityId?: UUID }
@@ -80,6 +99,16 @@ export async function getPendingRestartConfirmation(
   return null;
 }
 
+/**
+ * Clears any stored restart confirmation requests across scoped cache keys.
+ *
+ * @param runtime - Active Eliza runtime used for scoped cache/log writes.
+ * @param context - Optional room/entity scope used to clear context-specific confirmations.
+ * @param reason - Reason code for audit logging of the clear operation.
+ * @returns Promise that resolves when all matching cache keys are cleared.
+ * @example
+ * await clearPendingRestartConfirmation(runtime, { roomId, entityId }, 'approved');
+ */
 export async function clearPendingRestartConfirmation(
   runtime: IAgentRuntime,
   context: { roomId?: UUID; entityId?: UUID },

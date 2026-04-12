@@ -1,6 +1,15 @@
 import { Action, type HandlerCallback, type IAgentRuntime, type Memory, type State } from '@elizaos/core';
 import { getLatestAlertPreference } from '../evaluators/alertPreferenceStore.ts';
 
+/**
+ * Action definition for showing persisted alert preferences to the user.
+ *
+ * @param runtime - Active Eliza runtime handling the request.
+ * @param message - User message used to validate alert settings intent.
+ * @returns Action object whose handler returns saved alert preference text.
+ * @example
+ * User: "what are my alert settings?"
+ */
 export const getAlertSettingsAction: Action = {
   name: 'GET_ALERT_SETTINGS',
   description: 'Show saved alert preferences learned from conversation memory',

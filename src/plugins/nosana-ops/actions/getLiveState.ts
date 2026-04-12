@@ -1,6 +1,15 @@
 import { Action, type HandlerCallback, type IAgentRuntime, type Memory, type State } from '@elizaos/core';
 import { getNosanaLiveStateSnapshot } from '../providers/nosanaContext.ts';
 
+/**
+ * Action definition for returning a concise real-time Nosana state block.
+ *
+ * @param runtime - Active Eliza runtime handling the request.
+ * @param message - User message used to validate live-state intent.
+ * @returns Action object whose handler returns the provider snapshot text.
+ * @example
+ * User: "show live state right now"
+ */
 export const getLiveStateAction: Action = {
   name: 'GET_LIVE_STATE',
   description:

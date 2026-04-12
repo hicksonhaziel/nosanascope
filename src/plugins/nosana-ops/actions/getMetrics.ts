@@ -1,6 +1,23 @@
-import { Action, type IAgentRuntime, type Memory, type State, type HandlerCallback } from '@elizaos/core';
+import {
+  type Action,
+  type ActionResult,
+  type IAgentRuntime,
+  type Memory,
+  type State,
+  type HandlerCallback,
+} from '@elizaos/core';
 import { createNosanaClient } from '@nosana/kit';
+import { getRequiredNosanaApiKey } from '../config/envValidation.ts';
 
+/**
+ * Action definition for detailed infrastructure metrics including uptime, burn rate, and job snapshot.
+ *
+ * @param runtime - Active Eliza runtime handling the request.
+ * @param message - User message used to validate detailed metrics intent.
+ * @returns Action object whose handler emits a metrics-focused `ActionResult`.
+ * @example
+ * User: "give me detailed metrics"
+ */
 export const getMetricsAction: Action = {
   name: 'GET_METRICS',
   description:
@@ -25,10 +42,11 @@ export const getMetricsAction: Action = {
     state?: State,
     options?: any,
     callback?: HandlerCallback
-  ): Promise<boolean> => {
+  ): Promise<ActionResult> => {
     try {
+      const apiKey = getRequiredNosanaApiKey();
       const client = createNosanaClient(undefined as any, {
-        api: { apiKey: process.env.NOSANA_API_KEY },
+        api: { apiKey },
       });
       
       const [balance, deploymentsRes, markets] = await Promise.all([
@@ -123,11 +141,20 @@ export const getMetricsAction: Action = {
         `▸ GPU markets in use: ${usedGpuTypes.size > 0 ? Array.from(usedGpuTypes).slice(0, 6).join(', ') : 'unknown'}`;
       
       if (callback) await callback({ text: metrics });
-      return true;
+      return {
+        success: true,
+        text: 'Fetched infrastructure metrics',
+        data: { deploymentCount: deployments.length },
+      };
       
-    } catch (error: any) {
-      if (callback) await callback({ text: `Failed: ${error.message}` });
-      return false;
+    } catch (error: unknown) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      if (callback) await callback({ text: `Failed: ${messageText}` });
+      return {
+        success: false,
+        text: `Failed: ${messageText}`,
+        error: messageText,
+      };
     }
   },
   

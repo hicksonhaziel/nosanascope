@@ -1,6 +1,23 @@
-import { Action, type IAgentRuntime, type Memory, type State, type HandlerCallback } from '@elizaos/core';
+import {
+  type Action,
+  type ActionResult,
+  type IAgentRuntime,
+  type Memory,
+  type State,
+  type HandlerCallback,
+} from '@elizaos/core';
 import { createNosanaClient } from '@nosana/kit';
+import { getRequiredNosanaApiKey } from '../config/envValidation.ts';
 
+/**
+ * Action definition for inspecting active serving nodes behind running deployments.
+ *
+ * @param runtime - Active Eliza runtime handling the request.
+ * @param message - User message used to validate node health intent.
+ * @returns Action object whose handler emits node health `ActionResult` values.
+ * @example
+ * User: "check node health"
+ */
 export const getNodeHealthAction: Action = {
   name: 'GET_NODE_HEALTH',
   description: 'Check which nodes are actively serving running deployment jobs',
@@ -20,10 +37,11 @@ export const getNodeHealthAction: Action = {
     state?: State,
     options?: any,
     callback?: HandlerCallback
-  ): Promise<boolean> => {
+  ): Promise<ActionResult> => {
     try {
+      const apiKey = getRequiredNosanaApiKey();
       const client = createNosanaClient(undefined as any, {
-        api: { apiKey: process.env.NOSANA_API_KEY },
+        api: { apiKey },
       });
 
       const runningDeploymentsRes = await client.api.deployments.list({
@@ -48,7 +66,11 @@ export const getNodeHealthAction: Action = {
               (fallback.length > 0 ? `Top markets:\n${fallback.join('\n')}` : ''),
           });
         }
-        return true;
+        return {
+          success: true,
+          text: 'No running deployments found for node health',
+          data: { runningDeployments: 0, markets: markets.length },
+        };
       }
 
       const runningJobsByDeployment = await Promise.all(
@@ -130,7 +152,11 @@ export const getNodeHealthAction: Action = {
               `No running job details were returned, so per-node serving status is unavailable right now.`,
           });
         }
-        return true;
+        return {
+          success: true,
+          text: 'Running deployments found but no node details available',
+          data: { runningDeployments: runningDeployments.length, activeNodes: 0 },
+        };
       }
 
       const topNodes = Array.from(nodeStats.entries())
@@ -154,13 +180,21 @@ export const getNodeHealthAction: Action = {
         `Top nodes:\n${topNodes.join('\n')}`;
 
       if (callback) await callback({ text: summary });
-      return true;
+      return {
+        success: true,
+        text: 'Fetched node health summary',
+        data: { runningDeployments: runningDeployments.length, activeNodes: nodeStats.size },
+      };
       
-    } catch (error: any) {
-      const errorMsg = `Failed to fetch node health: ${error.message}`;
-      console.error('[getNodeHealth]', errorMsg, error);
+    } catch (error: unknown) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      const errorMsg = `Failed to fetch node health: ${messageText}`;
       if (callback) await callback({ text: errorMsg });
-      return false;
+      return {
+        success: false,
+        text: errorMsg,
+        error: messageText,
+      };
     }
   },
   

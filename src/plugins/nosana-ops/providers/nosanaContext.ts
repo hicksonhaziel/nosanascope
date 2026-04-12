@@ -106,6 +106,15 @@ async function buildLiveState(): Promise<ProviderResult> {
   };
 }
 
+/**
+ * Builds or retrieves a cached live Nosana provider snapshot.
+ *
+ * @param runtime - Runtime context is passed by provider caller when available.
+ * @param message - Triggering message context used by provider pipeline.
+ * @returns Provider result containing formatted live-state text and machine-readable values.
+ * @example
+ * Called by provider pipeline before an LLM response to inject fresh Nosana state.
+ */
 export async function getNosanaLiveStateSnapshot(): Promise<ProviderResult> {
   const now = Date.now();
   if (cachedResult && cachedResult.expiresAt > now) {
@@ -144,6 +153,15 @@ export async function getNosanaLiveStateSnapshot(): Promise<ProviderResult> {
   return await inflight;
 }
 
+/**
+ * Provider definition that injects live Nosana context into each model turn.
+ *
+ * @param runtime - Active Eliza runtime for provider execution.
+ * @param message - Current user message being processed.
+ * @returns Provider object that emits live state text/value payloads.
+ * @example
+ * Provider name in pipeline: "NOSANA_LIVE_STATE"
+ */
 export const nosanaContextProvider: Provider = {
   name: 'NOSANA_LIVE_STATE',
   description: 'Injects current Nosana job, credit, and burn-rate state into each message context',

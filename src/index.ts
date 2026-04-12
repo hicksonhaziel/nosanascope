@@ -1,9 +1,10 @@
 import { logger, type IAgentRuntime, type Project, type ProjectAgent } from '@elizaos/core';
-import starterPlugin from './plugin.ts';
 import { nosanascopeCharacter } from './characters/nosanascope.character.ts';
 import nosanaOpsPlugin from './plugins/nosana-ops/index.ts';
+import { validateNosanaOpsStartupEnv } from './plugins/nosana-ops/config/envValidation.ts';
 
 const initCharacter = ({ runtime }: { runtime: IAgentRuntime }) => {
+  validateNosanaOpsStartupEnv();
   logger.info('Initializing NosanaScope');
   logger.info({ name: nosanascopeCharacter.name }, 'Character loaded');
 };

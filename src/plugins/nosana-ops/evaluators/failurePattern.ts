@@ -294,6 +294,15 @@ async function runFailureCheck(
   }
 }
 
+/**
+ * Evaluator definition that detects failure bursts and low-credit risk on a 5-minute cadence.
+ *
+ * @param runtime - Active Eliza runtime used for state, memory, and alert side effects.
+ * @param message - Current message context used to bind room/entity scope and manual triggers.
+ * @returns Evaluator object that runs anomaly checks and emits proactive alerts.
+ * @example
+ * User: "run failure check now"
+ */
 export const failurePatternEvaluator: Evaluator = {
   name: 'FAILURE_PATTERN_EVALUATOR',
   description:

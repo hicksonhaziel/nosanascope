@@ -1,6 +1,23 @@
-import { Action, type IAgentRuntime, type Memory, type State, type HandlerCallback } from '@elizaos/core';
+import {
+  type Action,
+  type ActionResult,
+  type IAgentRuntime,
+  type Memory,
+  type State,
+  type HandlerCallback,
+} from '@elizaos/core';
 import { createNosanaClient } from '@nosana/kit';
+import { getRequiredNosanaApiKey } from '../config/envValidation.ts';
 
+/**
+ * Action definition for listing Nosana deployments and their status summary.
+ *
+ * @param runtime - Active Eliza runtime handling the request.
+ * @param message - User message used to validate "jobs/deployments" intent.
+ * @returns Action object whose handler emits a deployment summary `ActionResult`.
+ * @example
+ * User: "show my jobs"
+ */
 export const getJobsAction: Action = {
   name: 'GET_JOBS',
   description: 'Fetch your Nosana deployments',
@@ -17,10 +34,11 @@ export const getJobsAction: Action = {
     state?: State,
     options?: any,
     callback?: HandlerCallback
-  ): Promise<boolean> => {
+  ): Promise<ActionResult> => {
     try {
+      const apiKey = getRequiredNosanaApiKey();
       const client = createNosanaClient(undefined as any, {
-        api: { apiKey: process.env.NOSANA_API_KEY },
+        api: { apiKey },
       });
       
       const response = await client.api.deployments.list();
@@ -28,7 +46,7 @@ export const getJobsAction: Action = {
       
       if (deployments.length === 0) {
         if (callback) await callback({ text: 'No deployments found.' });
-        return true;
+        return { success: true, text: 'No deployments found.' };
       }
       
       const running = deployments.filter((d: any) => d.status === 'RUNNING');
@@ -49,12 +67,20 @@ export const getJobsAction: Action = {
       }
       
       if (callback) await callback({ text: summary });
-      return true;
+      return {
+        success: true,
+        text: 'Fetched deployments summary',
+        data: { totalItems: Number(response.total_items || deployments.length) },
+      };
       
-    } catch (error: any) {
-      console.error('[getJobs]', error);
-      if (callback) await callback({ text: `Failed: ${error.message}` });
-      return false;
+    } catch (error: unknown) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      if (callback) await callback({ text: `Failed: ${messageText}` });
+      return {
+        success: false,
+        text: `Failed: ${messageText}`,
+        error: messageText,
+      };
     }
   },
   
