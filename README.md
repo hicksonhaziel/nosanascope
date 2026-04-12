@@ -1,279 +1,264 @@
 # NosanaScope
 
-NosanaScope is an ElizaOS agent that monitors, manages, and heals Nosana GPU deployments, with a real-time `/dashboard` UI and Telegram alerts. It continuously tracks deployment health, active jobs, credit balance, and estimated burn rate, then exposes that data through actions and provider context. It can also execute operational commands in plain English, including listing jobs, checking node health, restarting deployments, and spawning new deployments from a template.
+> An ElizaOS agent that monitors, manages, and heals your Nosana GPU deployments — deployed on the very infrastructure it watches.
 
-## What It Does (3 Sentences)
-NosanaScope gives you a natural-language control plane for your Nosana infrastructure. It combines live Nosana API reads, proactive evaluators, and a polling service that persists metrics for trend analysis and dashboard visualization. The same agent can both answer observability questions and execute guarded operational actions like restart, cancel, and spawn with confirmation workflows.
+NosanaScope gives Nosana builders a conversational interface to their GPU infrastructure. Ask for status, investigate anomalies, and execute fixes from the same workflow. All inference runs through the Nosana-hosted Qwen3.5-27B endpoint. No AWS. No Datadog. No centralized dependency.
 
-## Architecture Diagram
+---
 
-### Mermaid
+## Table of Contents
+
+- [What It Does](#what-it-does)
+- [Architecture](#architecture)
+- [Plugin Reference](#plugin-reference)
+- [Quick Start](#quick-start)
+- [Environment Variables](#environment-variables)
+- [Nosana Deployment](#nosana-deployment)
+- [Running Tests](#running-tests)
+
+---
+
+## What It Does
+
+NosanaScope combines observability and operations in a single conversational agent:
+
+- **Live job monitoring** — active, failed, and queued job counts injected into every agent turn automatically
+- **Natural-language ops** — restart, cancel, or spawn jobs by asking in plain English, with confirmation before any destructive action
+- **Proactive Telegram alerts** — the agent fires alerts when failure patterns emerge or credits run low, without being asked
+- **Credit intelligence** — current balance, burn rate, and runway estimate always available
+- **Node health** — inspect which Nosana nodes are serving requests and their current load
+- **Metrics history** — PostgreSQL-backed snapshots power the dashboard charts and allow historical queries
+- **Alert preference learning** — tell the agent your thresholds once; it remembers them across restarts via ElizaOS memory
+
+---
+
+## Architecture
+
 ```mermaid
-flowchart LR
-    User[User via Web or Telegram] --> Dash[Next.js Dashboard /dashboard]
-    User --> Tg[Telegram Bot]
-    Dash --> DashAPI[/dashboard/api/chat + /dashboard/api/metrics]
-    DashAPI --> Agent[ElizaOS Runtime + NosanaScope Plugin]
-    Tg --> Agent
+flowchart TD
+    subgraph NOSANA["Nosana Network"]
+        AGENT["NosanaScope Agent\n(ElizaOS Runtime)"]
+        QWEN["Qwen3.5-27B Inference\n(Nosana-hosted endpoint)"]
+        JOBS["Other Nosana GPU Jobs\n(monitored)"]
+        DB[("PostgreSQL\nMetrics Store")]
+    end
 
-    Agent --> A1[Actions]
-    Agent --> P1[Provider: NOSANA_LIVE_STATE]
-    Agent --> E1[Evaluators]
-    Agent --> S1[Service: MetricsPoller]
+    PLUGIN["plugin-nosana-ops\n7 Actions · Provider · 2 Evaluators"]
+    DASH["Next.js Dashboard\n(port 3000)"]
+    TG["Telegram Bot\n(proactive alerts)"]
 
-    A1 --> Nosana[Nosana API via @nosana/kit]
-    P1 --> Nosana
-    E1 --> Nosana
-    E1 --> TgAlert[Telegram Alert API]
-
-    S1 --> Nosana
-    S1 --> PG[(PostgreSQL metrics DB)]
-    DashAPI --> AgentAPI[/api/metrics + messaging/]
-    AgentAPI --> PG
+    QWEN -->|"LLM inference"| AGENT
+    AGENT <-->|"Actions + Provider"| PLUGIN
+    PLUGIN -->|"nosana-kit SDK"| JOBS
+    AGENT -->|"30s snapshots"| DB
+    DB -->|"metrics history"| DASH
+    AGENT <-->|"chat proxy"| DASH
+    AGENT -->|"failure alerts"| TG
 ```
 
-### ASCII
-```text
-Browser (/dashboard) --> Next.js route handlers --> Eliza agent runtime
-                                             |          |
-                                             |          +--> nosanaContextProvider (live snapshot)
-                                             |          +--> actions (jobs/credits/metrics/restart/spawn)
-                                             |          +--> evaluators (alert preferences + failure detector)
-                                             |
-                                             +--> /api/metrics (runtime route) <-- MetricsPollerService <-- Nosana API
-                                                                                     |
-                                                                                     +--> PostgreSQL history
+### Data flow
 
-Telegram <--> Eliza runtime
-Evaluator alerts --> Telegram Bot API
-```
+1. Background poller runs every 30 seconds — calls Nosana SDK and writes a snapshot to PostgreSQL
+2. User sends a message via dashboard chat or Telegram
+3. ElizaOS fires `nosanaContextProvider` before every LLM call, injecting live job state into the prompt
+4. Qwen3.5 (on Nosana) generates a response and selects an action if needed
+5. ElizaOS executes the matched action (e.g. `restartJob`)
+6. `alertPreferenceEvaluator` post-processes the turn and stores any new preferences to memory
+7. `failurePatternEvaluator` runs on a 5-minute tick and fires a Telegram alert if thresholds are crossed
+8. Dashboard polls `/api/metrics` every 10 seconds and re-renders panels
 
-## Quick Start
-
-### 1. Prerequisites
-- Node.js 20+
-- npm 10+
-- Docker (for local PostgreSQL)
-- At least one model provider key for Eliza runtime (for example `ELIZAOS_API_KEY`)
-- Nosana API key
-
-### 2. Install Dependencies
-```bash
-npm install
-cd dashboard && npm install && cd ..
-```
-
-### 3. Configure Environment
-```bash
-cp .env.example .env
-```
-Update `.env` with real values, especially:
-- `ELIZAOS_API_KEY`
-- `NOSANA_API_KEY`
-- `NOSANA_JOB_TEMPLATE` (valid JSON)
-- `NOSANA_METRICS_POSTGRES_URL`
-- `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (optional but recommended)
-
-Create dashboard env file:
-```bash
-cat > dashboard/.env.local <<'ENV'
-AGENT_API_BASE_URL=http://localhost:3000
-ELIZA_SERVER_AUTH_TOKEN=
-ELIZA_AGENT_ID=
-ENV
-```
-
-### 4. Start Local PostgreSQL
-```bash
-docker compose up -d postgres
-```
-
-### 5. Run Agent + Dashboard
-Terminal A (agent):
-```bash
-npm run dev
-```
-
-Terminal B (dashboard, port 3001 to avoid conflict):
-```bash
-cd dashboard
-npm run dev -- --port 3001
-```
-Open `http://localhost:3001`.
+---
 
 ## Plugin Reference
 
+The core of NosanaScope is a custom ElizaOS plugin: `@nosanascope/plugin-nosana-ops`. It wraps `@nosana/sdk` directly and registers all actions, the provider, and both evaluators with the ElizaOS runtime.
+
 ### Actions
-| Action | Purpose | Typical Prompt | Safety/Notes |
-|---|---|---|---|
-| `GET_JOBS` | List deployments and status counts | “show my jobs” | Read-only |
-| `GET_CREDITS` | Show assigned/reserved/settled/available credits | “what is my balance?” | Read-only |
-| `GET_ALERT_SETTINGS` | Show saved alert preference from memory/log/cache | “what are my alert settings?” | Read-only |
-| `GET_LIVE_STATE` | Return concise live state block | “live state right now” | De-duplicates if reply already contains live state |
-| `GET_METRICS` | Detailed infra metrics (uptime, burn rate, utilization proxy) | “give me detailed metrics” | Read-only |
-| `CANCEL_JOB` | Stop deployment with explicit confirmation | “cancel job <name>” then “yes cancel <name>” | Confirmation required |
-| `RESTART_JOB` | Restart/start deployment with pending confirmation store | “restart job <name>” then “YES/NO” | Rate-limited (max 3/min per scope) |
-| `SPAWN_JOB` | Create deployment from `NOSANA_JOB_TEMPLATE` and auto-start from draft/stopped | “spawn job” then “yes spawn” | Confirmation required + template validation |
-| `GET_NODE_HEALTH` | Inspect serving nodes/jobs and endpoint online/offline signal | “check node health” | Read-only |
+
+| Action | Trigger phrase examples | What it does |
+|---|---|---|
+| `getJobs` | "show my jobs", "what's running" | Returns all jobs with state, GPU model, duration, and estimated cost |
+| `getCredits` | "what's my balance", "how many $NOS do I have" | Returns current staked credit balance with low-credit warning |
+| `getMetrics` | "give me metrics", "infrastructure summary" | Aggregates active/failed/queued counts, utilization, and daily spend |
+| `getNodeHealth` | "node status", "which nodes are serving" | Lists active Nosana nodes, load, GPU model, and latency |
+| `restartJob` | "restart job X", "resubmit the failed job" | Cancels then re-submits a job by ID. Asks for confirmation first. |
+| `cancelJob` | "cancel job X", "stop that job" | Graceful shutdown. Verifies job is running before acting. |
+| `spawnJob` | "run the inference template", "start a new job" | Launches a stored job template by name from environment config |
+
+All write actions (restart, cancel, spawn) include an explicit confirmation step — the agent will not execute destructive operations on the first message.
 
 ### Provider
-| Provider | Purpose |
-|---|---|
-| `NOSANA_LIVE_STATE` | Injects cached live snapshot (jobs, failures, queue, credits, burn rate) before model response |
+
+**`nosanaContextProvider`** — runs before every model call and injects a live state snapshot into the LLM prompt:
+
+```
+[LIVE NOSANA STATE — 2026-04-11T14:23:01Z]
+Active Jobs: 3
+Failed Jobs: 1
+Queued Jobs: 0
+Credit Balance: 47.3 $NOS
+Burn Rate: ~3.1 $NOS/hr
+```
+
+Results are cached for 30 seconds to avoid hammering the Nosana API on every streaming token.
 
 ### Evaluators
-| Evaluator | Purpose |
-|---|---|
-| `ALERT_PREFERENCE_EVALUATOR` | Extracts alert preferences from conversation and persists them |
-| `FAILURE_PATTERN_EVALUATOR` | Runs every turn + 5-minute ticker for failure burst/low-credit detection and proactive alerts |
 
-## JSDoc Coverage
-Every action, provider, and evaluator export has a JSDoc block including `@param`, `@returns`, and `@example`.
+**`alertPreferenceEvaluator`** — fires after each agent turn. If the user expresses an alert preference ("notify me when any job fails", "alert me if credits drop below 20 $NOS"), it uses the LLM to extract a structured preference and stores it in ElizaOS memory. On subsequent turns, the provider reads those preferences and shapes the context accordingly.
 
-- Actions: `src/plugins/nosana-ops/actions/*.ts`
-- Provider: `src/plugins/nosana-ops/providers/nosanaContext.ts`
-- Evaluators: `src/plugins/nosana-ops/evaluators/*.ts`
+**`failurePatternEvaluator`** — runs on a 5-minute background tick. Reads job history from PostgreSQL and compares against live state. Fires a proactive Telegram alert if:
+- 3 or more jobs fail within a 30-minute window
+- Credit balance drops below 10% of starting balance
+- GPU utilization exceeds 95% for more than 10 consecutive minutes
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js 23+
+- pnpm
+- Docker Desktop (for local PostgreSQL)
+- A Nosana wallet with builder credits ([claim here](https://nosana.com/builders-credits))
+- A Telegram bot token ([create via BotFather](https://t.me/BotFather))
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/hicksonhaziel/nosanascope
+cd nosanascope
+pnpm install
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Then fill in your values — see [Environment Variables](#environment-variables) below.
+
+### 3. Start local services
+
+```bash
+# Start PostgreSQL
+docker compose up -d db
+
+# Start the ElizaOS agent (port 3001)
+pnpm run dev:agent
+
+# Start the Next.js dashboard (port 3000)
+pnpm run dev:dashboard
+```
+
+### 4. Open the dashboard
+
+Visit [http://localhost:3000](http://localhost:3000). The dashboard will show live job state from your Nosana wallet within 30 seconds of the poller starting.
+
+### 5. Connect Telegram
+
+Start a chat with your bot on Telegram and send any message. The agent will respond using the same character and plugin as the web dashboard.
+
+---
 
 ## Environment Variables
 
-| Variable | Required | Example | Used By | Notes |
-|---|---|---|---|---|
-| `ELIZAOS_API_KEY` | Yes* | `eliza_...` | Agent runtime | Needed unless using another configured model provider |
-| `PGLITE_DATA_DIR` | No | `.eliza/.elizadb` | Core runtime | Local DB path |
-| `LOG_LEVEL` | No | `info` | Core runtime | Runtime logging level |
-| `NOSANA_API_KEY` | Yes | `nos_...` | Actions/provider/evaluators/poller | Required for Nosana API access |
-| `NOSANA_JOB_TEMPLATE` | Yes | JSON object string | `SPAWN_JOB`, startup validator | Must include `name`, `market`, `strategy`, `replicas`, `timeout`, `job_definition` |
-| `NOSANA_METRICS_POSTGRES_URL` | Recommended | `postgresql://agent:...` | Metrics poller + `/api/metrics` | Defaults to local compose DB pattern |
-| `POSTGRES_URL` | Optional | `postgresql://...` | Base Eliza runtime | Depends on runtime setup |
-| `NOSANA_DEBUG_EVALUATORS` | No | `false` | Evaluators | Enables verbose evaluator logs |
-| `TELEGRAM_BOT_TOKEN` | Optional | `<bot-token>` | Telegram alerts | Must be paired with `TELEGRAM_CHAT_ID` |
-| `TELEGRAM_CHAT_ID` | Optional | `<chat-id>` | Telegram alerts | Must be paired with `TELEGRAM_BOT_TOKEN` |
-| `AGENT_API_BASE_URL` | Yes (dashboard) | `http://localhost:3000` | `/dashboard` API routes | Proxy target for metrics/chat |
-| `ELIZA_SERVER_AUTH_TOKEN` | Optional | `<token>` | `/dashboard` chat proxy | Sent as `X-API-KEY` |
-| `ELIZA_AGENT_ID` | Optional | UUID | `/dashboard` chat proxy | If absent, dashboard picks active agent |
+Copy `.env.example` to `.env` and fill in every value before running.
 
-## `/dashboard` Guide
-The dashboard is in `dashboard/` and includes:
-- Job Status panel from latest persisted snapshot jobs
-- GPU panel (utilization, VRAM proxy, temperature estimate)
-- Credit burn chart over time
-- Chat panel using proxy route to Eliza messaging API
-
-See `dashboard/README.md` for dashboard-specific setup.
-
-## Nosana Deployment Guide
-
-### 1. Build and push the agent image
-```bash
-docker build -t <dockerhub-user>/nosanascope-agent:latest .
-docker push <dockerhub-user>/nosanascope-agent:latest
-```
-
-### 2. Prepare runtime secrets on Nosana
-Set secrets/vars in your Nosana deployment for:
-- `NOSANA_API_KEY`
-- `ELIZAOS_API_KEY` (or your active model-provider key)
-- `NOSANA_JOB_TEMPLATE`
-- `NOSANA_METRICS_POSTGRES_URL`
-- optional Telegram vars
-
-### 3. Example Nosana job definition
-```json
-{
-  "version": "1",
-  "type": "container",
-  "meta": { "trigger": "api" },
-  "ops": [
-    {
-      "op": "container/run",
-      "id": "nosanascope-agent",
-      "args": {
-        "image": "<dockerhub-user>/nosanascope-agent:latest",
-        "gpu": true,
-        "expose": 3000,
-        "cmd": ["node", "dist/src/index.js"],
-        "env": [
-          { "name": "NOSANA_API_KEY", "value": "$NOSANA_API_KEY" },
-          { "name": "ELIZAOS_API_KEY", "value": "$ELIZAOS_API_KEY" },
-          { "name": "NOSANA_JOB_TEMPLATE", "value": "$NOSANA_JOB_TEMPLATE" },
-          { "name": "NOSANA_METRICS_POSTGRES_URL", "value": "$NOSANA_METRICS_POSTGRES_URL" },
-          { "name": "TELEGRAM_BOT_TOKEN", "value": "$TELEGRAM_BOT_TOKEN" },
-          { "name": "TELEGRAM_CHAT_ID", "value": "$TELEGRAM_CHAT_ID" }
-        ]
-      }
-    }
-  ]
-}
-```
-
-### 4. Deploy and record your live URL
-After launch, copy your public deployment URL and update:
-- README “Project Description” section below
-- social post links
-
-### 5. Optional dashboard deployment
-Deploy `dashboard/` separately (for example on Vercel), set:
-- `AGENT_API_BASE_URL` to your live Eliza agent URL
-- `ELIZA_SERVER_AUTH_TOKEN` if your Eliza server requires auth
-
-## 300-Word Project Description (Submission Copy)
-NosanaScope is an ElizaOS agent built to monitor, operate, and protect Nosana GPU deployments in production. Instead of separating observability from operations, it combines both in one conversational interface, so you can ask for status, investigate anomalies, and execute fixes from the same workflow. The result is an infrastructure assistant that stays useful during normal traffic and during incidents.
-
-The custom plugin, `@nosanascope/plugin-nosana-ops`, integrates directly with `@nosana/kit` and exposes practical actions for daily operations: list deployments, check credits, return live state, inspect node health, compute detailed metrics, restart safely, cancel safely, and spawn from a validated template. A provider injects a fresh state snapshot into every model turn, including active jobs, failed jobs, queue estimate, available credits, and burn-rate estimate. Two evaluators extend behavior after each interaction: one learns alert preferences from natural language, and the other detects failure bursts or low-credit risk and can push proactive Telegram alerts.
-
-Beyond chat, NosanaScope runs a metrics poller service that captures snapshots on a fixed interval, persists them to PostgreSQL, and exposes a metrics history route for downstream clients. The `/dashboard` Next.js app consumes that history to render job panels, GPU/VRAM/temperature proxies, and burn-rate charts, then routes chat messages back to the live agent through server-side proxy endpoints.
-
-Operational safeguards are built in: explicit confirmation flows for destructive actions, restart rate limiting, strict environment validation, and test coverage for actions, provider behavior, evaluators, and configuration validation.
-
-The project is intentionally Nosana-native: it monitors Nosana workloads, reasons over Nosana cost signals, and is designed to run as a Nosana-deployed service. That alignment matters for builders who want fewer centralized dependencies and clearer operational ownership. Judges and teams can reproduce the full stack locally, then ship the same workflow to a live decentralized environment without middleware layers.
-
-GitHub: https://github.com/hicksonhaziel/nosanascope
-Live Nosana deployment URL: <PASTE_YOUR_LIVE_NOSANA_URL_HERE>
-
-Word count: 300
-
-## Social Post (Submission Day)
-Use this post template and attach **real screenshots from `/dashboard`** (header metrics + chart + chat panel):
-
-```text
-Just shipped NosanaScope for the @Nosana_AI x @elizaOS builders challenge.
-
-NosanaScope is an ElizaOS agent that monitors and manages Nosana GPU deployments, with a live dashboard and proactive Telegram alerts.
-
-✅ Real-time deployment/job state
-✅ Credit burn + runway visibility
-✅ Natural-language restart/cancel/spawn workflows
-✅ Node health and failure-pattern detection
-✅ Alert preference learning from conversation
-
-GitHub: https://github.com/hicksonhaziel/nosanascope
-Live: <PASTE_YOUR_LIVE_NOSANA_URL_HERE>
-
-#Nosana #ElizaOS #Solana #BuildOnNosana #OpenClaw
-```
-
-Suggested screenshots to attach:
-1. `/dashboard` top section showing Active / Failed / Credits pills
-2. Credit burn chart with recent trend
-3. Chat panel with a real “restart job” exchange
-
-## Final Repo Check
-
-| Check | Status | Notes |
+| Variable | Required | Description |
 |---|---|---|
-| Public fork/repo | ⚠️ Manual verify | Confirm GitHub visibility is public |
-| No API keys in tracked code | ✅ Verified locally | Secret-pattern scan found no hardcoded keys |
-| `.env.example` complete | ✅ Verified | Includes Nosana, template, Telegram, and evaluator vars |
-| Starred 4 Nosana repos | ⚠️ Manual verify | `agent-challenge`, `nosana-programs`, `nosana-kit`, `nosana-cli` |
-| README renders on GitHub | ✅ Expected | Standard Markdown sections/tables/code blocks |
+| `NOSANA_RPC_URL` | ✅ | Solana RPC endpoint — use `https://api.mainnet-beta.solana.com` or a private RPC |
+| `NOSANA_WALLET_PRIVATE_KEY` | ✅ | Base58-encoded private key of your Nosana-funded wallet |
+| `MODEL_ENDPOINT` | ✅ | Nosana-hosted Qwen3.5 inference URL (provided in builder credits email) |
+| `MODEL_NAME` | ✅ | `qwen3.5-27b-awq-4bit` |
+| `TELEGRAM_BOT_TOKEN` | ✅ | Token from BotFather — required for Telegram client and proactive alerts |
+| `TELEGRAM_CHAT_ID` | ✅ | Your personal chat ID — alerts are sent here. Get it from `@userinfobot` |
+| `DATABASE_URL` | ✅ | PostgreSQL connection string e.g. `postgresql://agent:password@localhost:5432/nosanascope` |
+| `SPAWN_TEMPLATE_JOB_DEF` | Optional | Path to a JSON job definition file used by `spawnJob` action |
+| `ALERT_RESTART_RATE_LIMIT` | Optional | Max restartJob calls per minute. Defaults to `3`. |
+| `LOG_LEVEL` | Optional | `debug` for verbose output, `info` for normal. Defaults to `info`. |
 
-## Testing
+> **Never commit your `.env` file.** It is listed in `.gitignore`. Use `.env.example` with placeholder values for documentation.
+
+---
+
+## Nosana Deployment
+
+NosanaScope deploys as a two-container Nosana job: the ElizaOS agent and a PostgreSQL instance.
+
+### 1. Build and push Docker images
+
 ```bash
-npm run test:unit
+# Agent image
+docker build -t your-dockerhub-username/nosanascope-agent:latest ./agent
+docker push your-dockerhub-username/nosanascope-agent:latest
+
+# Dashboard image
+docker build -t your-dockerhub-username/nosanascope-dashboard:latest ./dashboard
+docker push your-dockerhub-username/nosanascope-dashboard:latest
 ```
 
-For dashboard build validation:
+### 2. Install Nosana CLI
+
 ```bash
-cd dashboard
-npm run build
+npm install -g @nosana/cli
+nosana --version
 ```
+
+### 3. Configure secrets
+
+In the Nosana Dashboard, create secrets for:
+- `wallet_key` — your wallet private key
+- `telegram_token` — your Telegram bot token
+- `db_password` — PostgreSQL password
+
+Reference these in `nosana_job_def.json` via `secretRef` fields (already configured in the provided file).
+
+### 4. Submit the job
+
+```bash
+nosana job submit --file nosana_job_def.json --market nvidia-3090 --timeout 60
+```
+
+The CLI will return a job ID and a public URL. That URL is your live deployment.
+
+### 5. Smoke test
+
+1. Open the live URL in a browser — the dashboard should load and show job state within 60 seconds
+2. Send a message in the chat panel — the agent should respond
+3. Send a message to your Telegram bot — it should also respond
+4. Check the Nosana Dashboard to confirm both containers are healthy
+
+---
+
+## Running Tests
+
+```bash
+# Run all tests
+pnpm test
+
+# Run with coverage report
+pnpm test:coverage
+
+# Run in watch mode during development
+pnpm test:watch
+
+# CI mode (exits 0 on pass, 1 on fail)
+pnpm test:ci
+```
+
+Test coverage targets: **80%+ across actions, provider, and evaluators.**
+
+All Nosana SDK calls are mocked in tests — no live API calls are made. The mock client is located at `__tests__/__mocks__/@nosana/sdk.ts` and is auto-applied by Jest.
+
+---
+
+## Acknowledgements
+
+Built for the [Nosana x ElizaOS Builders Challenge](https://earn.superteam.fun/listing/nosana-builders-elizaos-challenge).
+
+- [ElizaOS](https://elizaos.ai) — agent framework
+- [Nosana](https://nosana.com) — decentralized GPU network
+- [nosana-kit](https://github.com/nosana-ci/nosana-programs) — Nosana SDK
+- [Superteam Earn](https://earn.superteam.fun) — bounty platform
