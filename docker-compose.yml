@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nosanascope-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${NOSANA_DB_NAME:-nosanascope}
+      POSTGRES_USER: ${NOSANA_DB_USER:-agent}
+      POSTGRES_PASSWORD: ${NOSANA_DB_PASSWORD:-agent_password}
+    ports:
+      - '${NOSANA_DB_PORT:-5432}:5432'
+    volumes:
+      - nosanascope-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  nosanascope-postgres-data:

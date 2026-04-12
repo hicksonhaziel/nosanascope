@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+*.tsbuildinfo
+
+# Runtime/state data
+.eliza/
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Editor/OS files
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+coverage/
+.nyc_output/
+cypress/videos/
+cypress/screenshots/

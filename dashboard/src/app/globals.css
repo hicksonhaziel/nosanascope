@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f3f6f4;
+  --surface: #ffffff;
+  --surface-muted: #f7faf8;
+  --text: #101916;
+  --muted: #5b6e65;
+  --muted-strong: #3a4a43;
+  --border: #dbe5df;
+  --accent: #16bf75;
+  --success: #16bf75;
+  --danger: #de4f4f;
+  --shadow: 0 1px 2px rgba(16, 25, 22, 0.06), 0 8px 22px rgba(16, 25, 22, 0.04);
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f1513;
+  --surface: #141d1a;
+  --surface-muted: #192320;
+  --text: #e9f2ed;
+  --muted: #9cb2a8;
+  --muted-strong: #c6d5ce;
+  --border: #263630;
+  --accent: #18ca7d;
+  --success: #18ca7d;
+  --danger: #f07474;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+@theme inline {
+  --font-sans: "Space Grotesk", "Satoshi", "Avenir Next", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+}
