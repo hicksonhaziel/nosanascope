@@ -26,6 +26,16 @@ function extractErrorMessage(payload: MetricsApiResponse | null): string {
   return "Unable to load metrics.";
 }
 
+function getDisplayBalance(snapshot?: MetricsSnapshot): number {
+  if (!snapshot) return 0;
+  const direct = Number(snapshot.creditBalance);
+  if (Number.isFinite(direct)) return direct;
+  const assigned = Number(snapshot.payload?.assignedCredits || 0);
+  const reserved = Number(snapshot.payload?.reservedCredits || 0);
+  const settled = Number(snapshot.payload?.settledCredits || 0);
+  return assigned - reserved - settled;
+}
+
 export default function Home() {
   const [theme, setTheme] = useState<ThemeMode>("dark");
   const [snapshots, setSnapshots] = useState<MetricsSnapshot[]>([]);
@@ -76,12 +86,12 @@ export default function Home() {
   const latest = snapshots[0];
   const jobs = useMemo(() => latest?.payload?.jobs || [], [latest]);
   const isConnected = !error && snapshots.length > 0;
-  const activeJobs = Number(latest?.activeJobs || 0);
-  const failedJobs = Number(latest?.failedJobs || 0);
-  const creditBalance = Number(latest?.creditBalance || 0);
+  const activeDeployments = Number(latest?.deploymentRunning || 0);
+  const errorDeployments = Number(latest?.deploymentError || 0);
+  const creditBalance = getDisplayBalance(latest);
   const headerPills = [
-    { label: "Active", value: activeJobs, tone: "success" as const },
-    { label: "Failed", value: failedJobs, tone: "danger" as const },
+    { label: "Active Deployments", value: activeDeployments, tone: "success" as const },
+    { label: "Deployment Errors", value: errorDeployments, tone: "danger" as const },
     { label: "Credits", value: creditBalance.toFixed(2), tone: "neutral" as const },
   ];
 
@@ -146,7 +156,7 @@ export default function Home() {
             transition={{ duration: 0.24 }}
             className="lg:col-span-7"
           >
-            <JobStatusPanel jobs={jobs} updatedAt={latest?.createdAt} />
+            <JobStatusPanel jobs={jobs} snapshot={latest} loading={loading} updatedAt={latest?.createdAt} />
           </motion.div>
 
           <motion.div
@@ -155,7 +165,7 @@ export default function Home() {
             transition={{ duration: 0.24, delay: 0.05 }}
             className="lg:col-span-5"
           >
-            <GPUMetricsPanel snapshot={latest} />
+            <ChatInterface />
           </motion.div>
 
           <motion.div
@@ -164,7 +174,7 @@ export default function Home() {
             transition={{ duration: 0.24, delay: 0.08 }}
             className="lg:col-span-8"
           >
-            <CreditBurnChart snapshots={snapshots} />
+            <CreditBurnChart snapshots={snapshots} loading={loading} />
           </motion.div>
 
           <motion.div
@@ -173,7 +183,7 @@ export default function Home() {
             transition={{ duration: 0.24, delay: 0.12 }}
             className="lg:col-span-4"
           >
-            <ChatInterface />
+            <GPUMetricsPanel snapshot={latest} loading={loading} />
           </motion.div>
         </main>
 

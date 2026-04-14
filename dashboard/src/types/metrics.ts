@@ -1,4 +1,5 @@
 export type DashboardJobCategory = "running" | "failed" | "queued" | "other";
+export type DashboardDeploymentCategory = "running" | "starting" | "stopped" | "error" | "other";
 
 export interface DashboardJob {
   id: string;
@@ -30,6 +31,13 @@ export interface MetricsSnapshot {
     vramUsagePct?: number;
     estimatedTemperatureC?: number;
     jobs?: DashboardJob[];
+    deployments?: Array<{
+      id?: string;
+      name?: string;
+      status?: string;
+      activeJobs?: number;
+      replicas?: number;
+    }>;
   };
 }
 
@@ -65,5 +73,14 @@ export function getJobCategory(state: string): DashboardJobCategory {
     return "failed";
   }
   if (["QUEUED", "PENDING", "DRAFT"].includes(normalized)) return "queued";
+  return "other";
+}
+
+export function getDeploymentCategory(state: string): DashboardDeploymentCategory {
+  const normalized = state.toUpperCase();
+  if (normalized === "RUNNING") return "running";
+  if (normalized === "STARTING") return "starting";
+  if (["STOPPED", "STOPPING"].includes(normalized)) return "stopped";
+  if (["ERROR", "FAILED", "INSUFFICIENT_FUNDS", "CRASHED"].includes(normalized)) return "error";
   return "other";
 }

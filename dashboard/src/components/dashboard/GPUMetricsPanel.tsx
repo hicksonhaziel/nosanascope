@@ -3,6 +3,7 @@ import type { MetricsSnapshot } from "@/types/metrics";
 
 interface GPUMetricsPanelProps {
   snapshot?: MetricsSnapshot;
+  loading?: boolean;
 }
 
 function StatRow({ label, value }: { label: string; value: string | number }) {
@@ -32,7 +33,7 @@ function MetricBar({ label, value }: { label: string; value: number }) {
   );
 }
 
-export function GPUMetricsPanel({ snapshot }: GPUMetricsPanelProps) {
+export function GPUMetricsPanel({ snapshot, loading = false }: GPUMetricsPanelProps) {
   const utilization = Number(snapshot?.payload?.gpuUtilizationPct || 0);
   const vram = Number(snapshot?.payload?.vramUsagePct || 0);
   const temp = Number(snapshot?.payload?.estimatedTemperatureC || 0);
@@ -45,13 +46,28 @@ export function GPUMetricsPanel({ snapshot }: GPUMetricsPanelProps) {
       </header>
 
       <div className="mt-4 grid gap-2">
-        <MetricBar label="GPU Utilization" value={utilization} />
-        <MetricBar label="VRAM Usage" value={vram} />
-        <StatRow label="Est. Temperature" value={`${temp.toFixed(1)}°C`} />
-        <StatRow label="Deployments (Total)" value={snapshot?.deploymentTotal ?? 0} />
-        <StatRow label="Deployments (Running)" value={snapshot?.deploymentRunning ?? 0} />
-        <StatRow label="Deployments (Error)" value={snapshot?.deploymentError ?? 0} />
+        {loading && !snapshot ? (
+          Array.from({ length: 6 }).map((_, index) => (
+            <div
+              key={`gpu-loading-${index}`}
+              className="h-12 animate-pulse rounded-md border border-[var(--border)] bg-[var(--surface-muted)]"
+            />
+          ))
+        ) : (
+          <>
+            <MetricBar label="GPU Utilization" value={utilization} />
+            <MetricBar label="VRAM Usage" value={vram} />
+            <StatRow label="Est. Temperature" value={`${temp.toFixed(1)}°C`} />
+            <StatRow label="Deployments (Total)" value={snapshot?.deploymentTotal ?? 0} />
+            <StatRow label="Deployments (Running)" value={snapshot?.deploymentRunning ?? 0} />
+            <StatRow label="Deployments (Error)" value={snapshot?.deploymentError ?? 0} />
+          </>
+        )}
       </div>
+      <p className="mt-3 rounded-md border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-xs text-[var(--muted)]">
+        Note: GPU utilization, VRAM usage, and temperature are estimated signals, not direct
+        network telemetry.
+      </p>
     </section>
   );
 }

@@ -12,32 +12,52 @@ import type { MetricsSnapshot } from "@/types/metrics";
 
 interface CreditBurnChartProps {
   snapshots: MetricsSnapshot[];
+  loading?: boolean;
 }
 
-export function CreditBurnChart({ snapshots }: CreditBurnChartProps) {
+function getDisplayBalance(snapshot?: MetricsSnapshot): number {
+  if (!snapshot) return 0;
+  const direct = Number(snapshot.creditBalance);
+  if (Number.isFinite(direct)) return direct;
+
+  const assigned = Number(snapshot.payload?.assignedCredits || 0);
+  const reserved = Number(snapshot.payload?.reservedCredits || 0);
+  const settled = Number(snapshot.payload?.settledCredits || 0);
+  return assigned - reserved - settled;
+}
+
+export function CreditBurnChart({ snapshots, loading = false }: CreditBurnChartProps) {
   const latest = snapshots[0];
   const normalized = [...snapshots].reverse();
   const step = normalized.length > 96 ? Math.ceil(normalized.length / 96) : 1;
   const sampled = normalized.filter((_, index) => index % step === 0);
 
+  if (normalized.length > 0) {
+    const latestNormalized = normalized[normalized.length - 1];
+    if (sampled[sampled.length - 1]?.id !== latestNormalized.id) {
+      sampled.push(latestNormalized);
+    }
+  }
+
   const chartData = sampled.map((item) => {
     const ts = new Date(item.createdAt).getTime();
     return {
       time: Number.isFinite(ts) ? ts : 0,
-      balance: Number(item.creditBalance || 0),
+      balance: getDisplayBalance(item) as number | null,
       runway: null as number | null,
     };
   });
 
   const latestPoint = chartData[chartData.length - 1];
   const burnRate = Number(latest?.burnRatePerHour || 0);
-  const runwayHours = burnRate > 0 ? Number(latest?.creditBalance || 0) / burnRate : null;
+  const currentBalance = getDisplayBalance(latest);
+  const runwayHours = burnRate > 0 ? currentBalance / burnRate : null;
 
   if (latestPoint && runwayHours && Number.isFinite(runwayHours) && runwayHours > 0) {
     latestPoint.runway = latestPoint.balance;
     chartData.push({
       time: latestPoint.time + runwayHours * 60 * 60 * 1000,
-      balance: 0,
+      balance: null,
       runway: 0,
     });
   }
@@ -50,7 +70,7 @@ export function CreditBurnChart({ snapshots }: CreditBurnChartProps) {
           <h2 className="text-base font-semibold tracking-wide text-[var(--text)]">Credit Burn</h2>
         </div>
         <span className="font-mono text-sm text-[var(--muted-strong)]">
-          {Number(latest?.burnRatePerHour || 0).toFixed(2)} / hr
+          {loading ? "..." : `${Number(latest?.burnRatePerHour || 0).toFixed(2)} / hr`}
         </span>
       </header>
 
@@ -59,7 +79,7 @@ export function CreditBurnChart({ snapshots }: CreditBurnChartProps) {
           <span className="text-[var(--muted)]">Available Credits</span>
           <div className="text-right">
             <span className="font-mono text-[var(--text)]">
-              {Number(latest?.creditBalance || 0).toFixed(2)}
+              {loading ? "..." : currentBalance.toFixed(2)}
             </span>
             <p className="text-xs text-[var(--muted)]">
               runway:{" "}
@@ -68,7 +88,16 @@ export function CreditBurnChart({ snapshots }: CreditBurnChartProps) {
           </div>
         </div>
         <div className="h-[240px] min-w-0 rounded-md border border-[var(--border)] bg-[var(--surface-muted)] p-2 md:p-3">
-          {chartData.length === 0 ? (
+          {loading && chartData.length === 0 ? (
+            <div className="grid h-full grid-rows-6 gap-2">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={`credit-loading-${index}`}
+                  className="animate-pulse rounded bg-[var(--surface)]"
+                />
+              ))}
+            </div>
+          ) : chartData.length === 0 ? (
             <div className="flex h-full items-center justify-center text-sm text-[var(--muted)]">
               Waiting for metrics samples.
             </div>
@@ -105,6 +134,7 @@ export function CreditBurnChart({ snapshots }: CreditBurnChartProps) {
                     })
                   }
                   formatter={(value, name) => {
+                    if (value === null || value === undefined) return ["n/a", String(name)];
                     const numeric = Number(value ?? 0);
                     if (name === "runway") return [`${numeric.toFixed(2)} NOS`, "Runway"];
                     return [`${numeric.toFixed(2)} NOS`, "Balance"];
