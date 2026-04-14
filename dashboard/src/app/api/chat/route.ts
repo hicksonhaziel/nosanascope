@@ -24,6 +24,8 @@ type SessionHistoryResponse = {
     id?: string;
     content?: string;
     isAgent?: boolean;
+    authorId?: string;
+    metadata?: unknown;
     createdAt?: string | number | Date;
   }>;
 };
@@ -50,7 +52,21 @@ function ensureUuid(value?: string | null): string {
 }
 
 function extractAssistantText(value: unknown): string {
-  if (typeof value === "string") return value.trim();
+  if (typeof value === "string") {
+    const raw = value.trim();
+    if (!raw) return "";
+    // Some session history entries serialize message content as JSON strings.
+    if ((raw.startsWith("{") && raw.endsWith("}")) || (raw.startsWith("[") && raw.endsWith("]"))) {
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        const nested = extractAssistantText(parsed);
+        if (nested) return nested;
+      } catch {
+        // Keep raw string when JSON parse fails.
+      }
+    }
+    return raw;
+  }
   if (!value || typeof value !== "object") return "";
 
   const obj = value as Record<string, unknown>;
@@ -141,7 +157,16 @@ async function sendMessage(
 
 function parseCreatedAtMs(value: string | number | Date | undefined): number {
   if (value === undefined) return 0;
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return 0;
+    // Some backends return unix seconds instead of milliseconds.
+    return value > 1_000_000_000 && value < 10_000_000_000 ? value * 1000 : value;
+  }
+  if (typeof value === "string" && /^[0-9]{10,16}$/.test(value.trim())) {
+    const parsedInt = Number(value.trim());
+    if (!Number.isFinite(parsedInt)) return 0;
+    return parsedInt < 10_000_000_000 ? parsedInt * 1000 : parsedInt;
+  }
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
 }
@@ -161,10 +186,13 @@ function looksLikeInterimReply(text: string): boolean {
 async function fetchLatestAgentMessage(
   baseUrl: string,
   sessionId: string,
-  sentAtMs: number
+  sentAtMs: number,
+  _sentContent: string,
+  userId: string
 ): Promise<string | null> {
+  const afterMs = Math.max(0, sentAtMs - 10_000);
   const response = await fetch(
-    `${baseUrl}/api/messaging/sessions/${sessionId}/messages?limit=25`,
+    `${baseUrl}/api/messaging/sessions/${sessionId}/messages?limit=100&after=${afterMs}`,
     {
       method: "GET",
       cache: "no-store",
@@ -175,14 +203,50 @@ async function fetchLatestAgentMessage(
   if (!response.ok) return null;
   const payload = (await response.json()) as SessionHistoryResponse;
   const messages = payload.messages || [];
+  const normalizedMessages = messages
+    .map((m, index) => {
+      const text = extractAssistantText(m?.content);
+      const authorId = typeof m?.authorId === "string" ? m.authorId : "";
+      const metadata =
+        m?.metadata && typeof m.metadata === "object"
+          ? (m.metadata as Record<string, unknown>)
+          : null;
+      const source = typeof metadata?.source === "string" ? metadata.source.toLowerCase() : "";
+      const hasActionMetadata =
+        Array.isArray(metadata?.actions) && (metadata?.actions as unknown[]).length > 0;
+      const isLikelyAgentSide =
+        Boolean(m?.isAgent) ||
+        (authorId.length > 0 && authorId !== userId) ||
+        source.startsWith("agent") ||
+        hasActionMetadata;
 
-  const candidate = messages.find((m) => {
-    if (!m?.isAgent || !m?.content) return false;
-    const createdAtMs = parseCreatedAtMs(m.createdAt);
-    return createdAtMs >= sentAtMs - 1000;
+      return {
+        index,
+        isLikelyAgentSide,
+        text,
+        createdAtMs: parseCreatedAtMs(m?.createdAt),
+      };
+    });
+
+  const recentAgentMessages = normalizedMessages.filter((m) => {
+    if (!m.isLikelyAgentSide || m.text.length === 0) return false;
+    if (m.createdAtMs === 0) return true;
+    return m.createdAtMs >= sentAtMs - 1500;
+  });
+  const fallbackAgentMessages = normalizedMessages.filter(
+    (m) => m.isLikelyAgentSide && m.text.length > 0
+  );
+  const agentMessages = recentAgentMessages.length > 0 ? recentAgentMessages : fallbackAgentMessages;
+  if (agentMessages.length === 0) return null;
+
+  const newestFirst = [...agentMessages].sort((a, b) => {
+    if (a.createdAtMs !== b.createdAtMs) return b.createdAtMs - a.createdAtMs;
+    // Session history endpoint returns newest-first; lower index is newer when timestamps tie.
+    return a.index - b.index;
   });
 
-  return candidate?.content ? String(candidate.content).trim() : null;
+  const nonInterim = newestFirst.find((m) => !looksLikeInterimReply(m.text));
+  return nonInterim?.text || newestFirst[0]?.text || null;
 }
 
 async function wait(ms: number): Promise<void> {
@@ -193,15 +257,17 @@ async function resolveFinalAssistantText(
   baseUrl: string,
   sessionId: string,
   sentAtMs: number,
+  sentContent: string,
+  userId: string,
   initialText: string
 ): Promise<string> {
   let bestText = initialText;
   const shouldWait = !bestText || looksLikeInterimReply(bestText);
   if (!shouldWait) return bestText;
 
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 24; i++) {
     await wait(500);
-    const latest = await fetchLatestAgentMessage(baseUrl, sessionId, sentAtMs);
+    const latest = await fetchLatestAgentMessage(baseUrl, sessionId, sentAtMs, sentContent, userId);
     if (!latest) continue;
     bestText = latest;
     if (!looksLikeInterimReply(latest)) break;
@@ -251,6 +317,8 @@ export async function POST(request: NextRequest) {
       baseUrl,
       sessionId,
       sentAtMs,
+      message,
+      userId,
       initialText
     );
 

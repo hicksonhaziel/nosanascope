@@ -17,7 +17,6 @@ export const nosanascopeCharacter: Character = {
     
     // Platform plugins (conditional)
     ...(process.env.DISCORD_API_TOKEN?.trim() ? ['@elizaos/plugin-discord'] : []),
-    ...(process.env.TELEGRAM_BOT_TOKEN?.trim() ? ['@elizaos/plugin-telegram'] : []),
     
     // Bootstrap (always include unless disabled)
     ...(!process.env.IGNORE_BOOTSTRAP ? ['@elizaos/plugin-bootstrap'] : []),
